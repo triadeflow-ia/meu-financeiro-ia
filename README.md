@@ -79,7 +79,7 @@ Opcional – **Supabase Realtime** (atualização automática ao cadastrar clien
 ### Backend
 
 - **`POST /api/bank/sync`** – Busca extrato Santander (Balance and Statement) via mTLS; faz **match** por valor e nome no PIX e cria transações (evita duplicata por `hash_bancario`).
-- **`POST /api/webhook/whatsapp`** – Recebe mensagens (Evolution API / Z-API); usa OpenAI para áudio (Whisper) e texto; **cadastra cliente** ou **dá baixa manual** conforme a intenção.
+- **`POST /api/webhook/whatsapp`** – Recebe mensagens da **Z-API**; usa OpenAI para áudio (Whisper) e texto; **cadastra cliente** ou **dá baixa manual** e envia a resposta de volta via Z-API send-text.
 - **`GET /api/clientes`** – Lista clientes com **status_pagamento** calculado: `pago`, `pendente`, `atrasado`.
 - **`GET /api/clientes/dashboard`** – KPIs: total recebido no mês, notas a emitir, clientes inadimplentes.
 - **`GET /api/clientes/export/contabilidade`** – CSV: Data, Cliente, Valor, Documento.

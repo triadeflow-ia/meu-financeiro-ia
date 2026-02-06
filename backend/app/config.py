@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     CERT_FILE: str = "santander.crt"  # ou santander.pem - nome do certificado do Santander
     SANTANDER_EXTRATO_URL: str = "https://api.santander.com.br/sandbox/extrato/v1"
 
+    # CORS: origens permitidas separadas por vírgula (ex.: https://meu-app.vercel.app)
+    CORS_ORIGINS: str = ""
+
     class Config:
         env_file = ".env"
         extra = "ignore"

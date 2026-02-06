@@ -36,10 +36,10 @@
     `GET /api/clientes/{id}`, `POST /api/clientes`, `PATCH /api/clientes/{id}`, `DELETE /api/clientes/{id}`.
   - **Bank:** `POST /api/bank/sync` – mTLS, extrato PIX, match com clientes, inserção em `transacoes` com anti-duplicidade por `hash_bancario`.
   - **Santander (legado):** `POST /api/santander/sincronizar` – alternativa ao bank/sync.
-  - **Webhook:** `POST /api/webhook/whatsapp` – recebe JSON (Evolution API / Z-API); usa GPT-4o para extrair intenção; cadastra cliente ou baixa manual; **envia a resposta de volta ao WhatsApp via Z-API send-text** quando `ZAPI_BASE_URL` está configurado.
+  - **Webhook:** `POST /api/webhook/whatsapp` – recebe JSON da **Z-API**; usa GPT-4o para extrair intenção; cadastra cliente ou baixa manual; **envia a resposta de volta ao WhatsApp via Z-API send-text** quando `ZAPI_BASE_URL` está configurado.
 - **Lógica de negócio:**
   - **app/api/bank_sync.py:** orquestra mTLS, busca PIX, match por valor + nome, inserção em `transacoes`.
-  - **app/routers/webhook.py:** extração de texto (Evolution e Z-API, incluindo `body["text"]["message"]`), áudio (Whisper), interpretação OpenAI, cadastro/baixa; **envio Z-API** via `_enviar_zapi_text(phone, message)` com header `Client-Token` opcional.
+  - **app/routers/webhook.py:** extração de texto/áudio do payload Z-API (`body["text"]["message"]`, etc.), áudio (Whisper), interpretação OpenAI, cadastro/baixa; **envio Z-API** via `_enviar_zapi_text(phone, message)` com header `Client-Token` opcional.
   - **app/santander_api.py:** URL configurável via `SANTANDER_EXTRATO_URL`, normalização para match.
   - **app/db.py:** cliente REST Supabase (JWT ou chave `sb_` com header `apikey`).
 - **Variáveis de ambiente (backend/.env):**

@@ -13,11 +13,13 @@ Guia para colocar o **backend** (e opcionalmente o frontend) no Railway. Com o b
 3. Escolha o repositório do projeto (ex.: `meu-financeiro-ia`).
 4. Railway cria um serviço. Clique nele para abrir as configurações.
 
-### 1.2 Definir raiz e build
+### 1.2 Definir raiz e build (obrigatório)
 
-1. Em **Settings** do serviço:
-   - **Root Directory:** `backend`
-   - **Builder:** **Dockerfile** (Railway usa o `backend/Dockerfile`).
+O repositório tem **backend/** e **frontend/** na raiz. O Railway precisa buildar só a pasta do backend:
+
+1. Em **Settings** do serviço do **backend**:
+   - **Root Directory:** `backend` ← **defina isso** (sem isso o Railpack tenta buildar a raiz e falha com "could not determine how to build").
+   - **Builder:** **Dockerfile** (ou deixe em automático; o `backend/railway.json` força o uso do Dockerfile).
 2. **Deploy** será disparado automaticamente após o primeiro push ou ao conectar.
 
 ### 1.3 Variáveis de ambiente
@@ -33,6 +35,7 @@ Em **Variables** do serviço, adicione as mesmas que você usa no `backend/.env`
 | `ZAPI_CLIENT_TOKEN` | Opcional | Token da Z-API |
 | `API_KEY` | Opcional (segurança) | Chave para header X-API-KEY |
 | `ZAPI_SECURITY_TOKEN` | Opcional (validar webhook) | Token que a Z-API envia no header |
+| `CORS_ORIGINS` | Necessário se o front estiver em outro domínio | URL do front (ex.: `https://meu-app.vercel.app`) |
 
 Não é necessário definir `PORT`; o Railway define automaticamente.
 
@@ -59,7 +62,34 @@ Configure essa URL no painel da Z-API em **Webhook** / **Ao receber mensagem**.
 
 ---
 
-## 2. Frontend no Railway (opcional)
+## 2. Frontend em outro lugar (Vercel, Netlify, etc.)
+
+Se o front **não** estiver no Railway, você pode hospedá-lo na **Vercel** ou **Netlify** e apontar para o backend no Railway.
+
+### 2.1 Deploy do frontend (ex.: Vercel)
+
+1. Acesse [vercel.com](https://vercel.com) (ou Netlify) e conecte o repositório **meu-financeiro-ia**.
+2. **Root Directory:** `frontend`.
+3. **Build Command:** `npm run build` | **Output:** `dist`.
+4. Em **Environment Variables** (variáveis de **build**), adicione:
+   - `VITE_API_URL` = **URL do backend no Railway** (ex.: `https://meu-financeiro-backend-production-xxxx.up.railway.app`)
+   - `VITE_API_KEY` = mesmo valor do `API_KEY` do backend (se você usa)
+   - `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` (para Realtime, se quiser)
+5. Faça o deploy. A Vercel gera uma URL (ex.: `https://meu-financeiro-ia.vercel.app`).
+
+### 2.2 Liberar CORS no backend (Railway)
+
+No Railway, nas **Variables** do serviço do **backend**, adicione:
+
+- `CORS_ORIGINS` = URL do front (ex.: `https://meu-financeiro-ia.vercel.app`)
+
+Se tiver mais de um domínio, use vírgula: `https://app.vercel.app,https://outro.netlify.app`.
+
+Faça um novo deploy do backend no Railway para aplicar. Depois disso, o front na Vercel/Netlify consegue chamar a API no Railway.
+
+---
+
+## 3. Frontend no Railway (opcional)
 
 Se quiser o Dashboard também no Railway:
 
@@ -67,10 +97,11 @@ Se quiser o Dashboard também no Railway:
 2. **Root Directory:** `frontend`.
 3. **Builder:** **Dockerfile** (usa o `frontend/Dockerfile`).
 4. Em **Variables**, defina as **build** (Build Variables / durante o build):
+   - `VITE_API_URL` = URL pública do backend no Railway (ex.: `https://xxx.up.railway.app`)
    - `VITE_API_KEY` (mesmo valor do `API_KEY` do backend)
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
-5. **Generate Domain** para o serviço do frontend.
+   - `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`
+5. No **backend**, adicione em Variables: `CORS_ORIGINS` = URL do serviço do front no Railway (após gerar domínio).
+6. **Generate Domain** para o serviço do frontend.
 
 O frontend em Docker usa Nginx e faz proxy de `/api` para o backend. Para isso funcionar no Railway, você tem duas opções:
 
@@ -81,7 +112,7 @@ Para manter o guia simples: **só o backend no Railway já resolve o webhook.** 
 
 ---
 
-## 3. Resumo rápido
+## 4. Resumo rápido
 
 1. **New Project** → Deploy from GitHub → repo do projeto.
 2. Serviço do **backend**: Root = `backend`, Builder = Dockerfile.

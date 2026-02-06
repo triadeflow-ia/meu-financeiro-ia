@@ -16,7 +16,11 @@ export type DashboardKPIs = {
   clientes_inadimplentes: number
 }
 
-const API_BASE = '/api'
+// Em produção (Vercel/Netlify/etc.), defina VITE_API_URL com a URL do backend (ex.: https://xxx.up.railway.app)
+const API_BASE =
+  import.meta.env.VITE_API_URL != null && String(import.meta.env.VITE_API_URL).trim() !== ''
+    ? `${String(import.meta.env.VITE_API_URL).replace(/\/$/, '')}/api`
+    : '/api'
 
 const API_KEY = import.meta.env.VITE_API_KEY as string | undefined
 

@@ -1,7 +1,8 @@
 """
-Webhook WhatsApp (Evolution API / Z-API).
+Webhook WhatsApp (Z-API).
 Processa áudio ou texto com OpenAI: cadastrar cliente ou dar baixa manual.
 Envia a resposta de volta ao WhatsApp via Z-API send-text quando ZAPI_BASE_URL está configurado.
+Aceita também payload no formato Evolution API para compatibilidade.
 """
 import os
 import re
@@ -18,7 +19,7 @@ from app.db import get_supabase
 router = APIRouter()
 client_openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY") or "")
 
-# Payload genérico (Evolution API e Z-API podem variar)
+# Payload genérico (Z-API principal; formato Evolution aceito opcionalmente)
 class WebhookWhatsAppBody(BaseModel):
     pass  # aceita qualquer JSON
 
@@ -42,8 +43,8 @@ Ações possíveis:
 Regras: Responda somente o JSON. dia_vencimento entre 1 e 28. valor_mensalidade sempre número. Se algo não for dito, use null ou valor padrão (dia_vencimento 10, valor_mensalidade 0)."""
 
 
-def _extrair_texto_evolution(body: dict) -> str:
-    """Extrai texto ou indica áudio do payload Evolution API."""
+def _extrair_texto_payload_evolution(body: dict) -> str:
+    """Extrai texto ou áudio do payload no formato Evolution API (compatibilidade)."""
     try:
         data = body.get("data", body)
         event = data.get("event", "")
@@ -79,8 +80,7 @@ def _extrair_texto_zapi(body: dict) -> str:
 
 def _extrair_phone_resposta(body: dict) -> str | None:
     """
-    Extrai o número para enviar a resposta (Z-API ou Evolution).
-    Z-API: phone (ou participantPhone em grupo), só responde se not fromMe.
+    Extrai o número para enviar a resposta (Z-API: phone ou participantPhone em grupo; ignora fromMe).
     """
     try:
         # Z-API: phone no root; em grupo usar participantPhone
@@ -216,8 +216,8 @@ def _validar_token_webhook(request: Request) -> None:
 @router.post("/whatsapp")
 async def webhook_whatsapp(request: Request):
     """
-    Recebe mensagens do WhatsApp (Evolution API ou Z-API).
-    Processa áudio (Whisper) ou texto com OpenAI e executa: cadastrar cliente ou baixa manual.
+    Recebe mensagens do WhatsApp (Z-API). Processa áudio (Whisper) ou texto com OpenAI:
+    cadastrar cliente ou baixa manual. Resposta enviada de volta via Z-API send-text.
     Se ZAPI_SECURITY_TOKEN estiver no .env, exige header X-ZAPI-Security-Token ou Client-Token com o mesmo valor.
     """
     _validar_token_webhook(request)
@@ -227,15 +227,15 @@ async def webhook_whatsapp(request: Request):
         raise HTTPException(status_code=400, detail="Body JSON inválido")
 
     texto = (
-        _extrair_texto_evolution(body)
-        or _extrair_texto_zapi(body)
+        _extrair_texto_zapi(body)
+        or _extrair_texto_payload_evolution(body)
         or (body.get("message") or body.get("text") or "").strip()
     )
     if not texto:
         return {"ok": True, "message": "Nenhuma mensagem para processar"}
 
     if texto == "__AUDIO__":
-        # Evolution: data.messages[0].message.audioMessage ou similar
+        # Z-API ou formato compatível: áudio em body.message.audio ou data.messages[0].message.audioMessage
         try:
             data = body.get("data", body)
             msg = (data.get("messages") or [{}])[0]
