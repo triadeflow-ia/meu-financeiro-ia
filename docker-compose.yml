@@ -1,0 +1,39 @@
+# MVP Gestão Financeira Inteligente
+# Backend (Python 3.11 + Uvicorn) + Frontend (build Vite + Nginx)
+#
+# Variáveis:
+#   - Backend: use backend/.env (SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY, API_KEY, ZAPI_*, etc.).
+#   - Frontend (build): na raiz, crie .env com VITE_API_KEY, VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+#     (ou exporte no shell antes de docker-compose build).
+#
+# Uso: docker-compose up -d --build
+# App: http://localhost (frontend); API: http://localhost:8000 (direto) ou http://localhost/api (via Nginx)
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: meu-financeiro-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_KEY: ${VITE_API_KEY:-}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+    container_name: meu-financeiro-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

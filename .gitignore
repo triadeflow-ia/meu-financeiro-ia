@@ -1,0 +1,33 @@
+# Env
+.env
+.env.local
+*.env
+
+# Certificados (nunca versionar chaves privadas)
+backend/certs/*.key
+backend/certs/*.crt
+backend/certs/*.pem
+!backend/certs/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+*.log
+npm-debug.log*
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
