@@ -42,3 +42,9 @@ app.include_router(webhook.router, prefix="/api/webhook", tags=["Webhook"])
 @app.get("/")
 def root():
     return {"message": "MVP Gestão Financeira API", "docs": "/docs"}
+
+
+@app.get("/health")
+def health():
+    """Rota para healthcheck (Railway, etc.). Não depende do Supabase."""
+    return {"status": "ok"}

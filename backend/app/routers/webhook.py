@@ -8,6 +8,7 @@ import os
 import re
 import base64
 import tempfile
+import logging
 from datetime import date
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -17,6 +18,7 @@ import httpx
 from app.db import get_supabase
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 client_openai = OpenAI(api_key=os.getenv("OPENAI_API_KEY") or "")
 
 # Payload genérico (Z-API principal; formato Evolution aceito opcionalmente)
@@ -61,13 +63,18 @@ def _extrair_texto_payload_evolution(body: dict) -> str:
 
 
 def _extrair_texto_zapi(body: dict) -> str:
-    """Extrai texto ou áudio do payload Z-API (webhook on-message-received)."""
+    """
+    Extrai texto ou áudio do payload Z-API (webhook on-message-received).
+    Doc: atributo text.message na raiz para mensagem de texto.
+    """
     try:
         if body.get("audio"):
             return "__AUDIO__"
+        # Doc Z-API: "text.message" (string) = mensagem de texto
         text_node = body.get("text")
         if isinstance(text_node, dict) and text_node.get("message"):
             return (text_node["message"] or "").strip()
+        # Fallbacks
         msg = body.get("message", body.get("payload", {}))
         if isinstance(msg, dict) and msg.get("audio"):
             return "__AUDIO__"
@@ -80,37 +87,75 @@ def _extrair_texto_zapi(body: dict) -> str:
 
 def _extrair_phone_resposta(body: dict) -> str | None:
     """
-    Extrai o número para enviar a resposta (Z-API: phone ou participantPhone em grupo; ignora fromMe).
+    Extrai o número/chat para enviar a resposta.
+    Doc Z-API (on-message-received): phone = "Phone number or group that sent the message" (raiz do payload).
+    Em grupo: phone = "5544999999999-group"; em direto: phone = "5544999999999".
+    Ignora mensagens fromMe.
     """
     try:
-        # Z-API: phone no root; em grupo usar participantPhone
         if body.get("fromMe") is True:
             return None
-        phone = body.get("participantPhone") or body.get("phone")
+        # Doc Z-API: campo "phone" na raiz; fallbacks para outros formatos
+        phone = (
+            body.get("phone")  # oficial: "Phone number or group that sent the message"
+            or body.get("participantPhone")  # em grupo: quem enviou; para responder ao grupo use phone
+            or body.get("senderPhone")
+            or body.get("from")
+            or (body.get("data") or {}).get("phone")
+            or (body.get("payload") or {}).get("phone")
+        )
         if not phone:
             return None
-        # Apenas dígitos (DDI + DDD + número)
-        digits = re.sub(r"\D", "", str(phone))
+        phone_str = str(phone).strip()
+        if "@" in phone_str:
+            phone_str = phone_str.split("@")[0]
+        # Grupo: doc envia "5544999999999-group"; send-text aceita group ID
+        if "-group" in phone_str or body.get("isGroup"):
+            return phone_str if len(phone_str) >= 10 else None
+        # Direto: doc send-text = "only send numbers without formatting or a mask"
+        digits = re.sub(r"\D", "", phone_str)
         return digits if len(digits) >= 10 else None
     except Exception:
         return None
 
 
-def _enviar_zapi_text(phone: str, message: str) -> bool:
-    """Envia texto via Z-API send-text. Retorna True se enviou com sucesso."""
+def _get_zapi_base_url() -> str:
+    """Base da Z-API (sem /send-text). Usa ZAPI_BASE_URL ou monta com ZAPI_INSTANCE_ID + ZAPI_INSTANCE_TOKEN."""
     base = (os.getenv("ZAPI_BASE_URL") or "").strip().rstrip("/")
+    if base:
+        return base
+    instance_id = (os.getenv("ZAPI_INSTANCE_ID") or "").strip()
+    instance_token = (os.getenv("ZAPI_INSTANCE_TOKEN") or "").strip()
+    if instance_id and instance_token:
+        return f"https://api.z-api.io/instances/{instance_id}/token/{instance_token}"
+    return ""
+
+
+def _enviar_zapi_text(phone: str, message: str) -> bool:
+    """
+    Envia texto via Z-API send-text (doc: developer.z-api.io/en/message/send-message-text).
+    POST {base}/send-text | Header: Client-Token (obrigatório se ativado) | Body: {"phone": "...", "message": "..."}.
+    """
+    base = _get_zapi_base_url()
     if not base or not phone or not message:
+        if not base:
+            logger.warning("Z-API: base URL vazia. Defina ZAPI_BASE_URL ou ZAPI_INSTANCE_ID + ZAPI_INSTANCE_TOKEN no Railway.")
         return False
     url = f"{base}/send-text"
     headers = {"Content-Type": "application/json"}
     client_token = (os.getenv("ZAPI_CLIENT_TOKEN") or "").strip()
     if client_token:
         headers["Client-Token"] = client_token
+    else:
+        logger.warning("Z-API: ZAPI_CLIENT_TOKEN não definido. Doc exige header Client-Token (Account security token). Defina no Railway.")
     try:
         with httpx.Client(timeout=15.0) as client:
             r = client.post(url, json={"phone": phone, "message": message}, headers=headers)
+            if r.status_code != 200:
+                logger.warning("Z-API send-text falhou: status=%s body=%s", r.status_code, r.text[:200])
             return r.status_code == 200
-    except Exception:
+    except Exception as e:
+        logger.warning("Z-API send-text exceção: %s", e)
         return False
 
 
@@ -156,22 +201,51 @@ def _openai_interpretar(texto: str) -> dict:
 
 
 def _cadastrar_cliente(payload: dict) -> str:
-    supabase = get_supabase()
+    """Valida os dados e insere no Supabase. Retorna mensagem de sucesso ou erro."""
     nome = (payload.get("nome") or "").strip()
     if not nome:
         return "Nome obrigatório."
-    valor = float(payload.get("valor_mensalidade", 0))
-    dia = int(payload.get("dia_vencimento", 10))
-    if dia < 1 or dia > 28:
+    if len(nome) > 255:
+        return "Nome muito longo."
+    try:
+        valor = float(payload.get("valor_mensalidade", 0))
+    except (TypeError, ValueError):
+        valor = 0.0
+    if valor < 0:
+        return "Valor da mensalidade não pode ser negativo."
+    try:
+        dia = int(payload.get("dia_vencimento", 10))
+    except (TypeError, ValueError):
         dia = 10
-    supabase.table("clientes").insert({
+    if dia < 1 or dia > 28:
+        return "Dia de vencimento deve ser entre 1 e 28."
+    doc = (payload.get("documento_cpf_cnpj") or "").strip() or None
+    if doc is not None and len(doc) > 20:
+        return "CPF/CNPJ muito longo."
+    row = {
         "nome": nome,
-        "documento_cpf_cnpj": (payload.get("documento_cpf_cnpj") or "").strip() or None,
-        "valor_mensalidade": valor,
-        "dia_vencimento": dia,
+        "documento_cpf_cnpj": doc,
+        "valor_mensalidade": round(float(valor), 2),
+        "dia_vencimento": int(dia),
         "status_ativo": True,
-    }).execute()
-    return f"Cliente '{nome}' cadastrado com mensalidade R$ {valor:.2f}, vencimento dia {dia}."
+    }
+    supabase = get_supabase()
+    try:
+        supabase.table("clientes").insert(row).execute()
+    except httpx.HTTPStatusError as e:
+        try:
+            body = e.response.json()
+            msg = body.get("message") or body.get("details") or e.response.text or str(e)
+        except Exception:
+            msg = e.response.text or str(e)
+        return f"Erro ao cadastrar no banco: {msg}"
+    return (
+        f"✅ _Cadastro confirmado!_\n\n"
+        f"Cliente *{nome}* foi registrado com sucesso.\n"
+        f"• Mensalidade: R$ {valor:.2f}\n"
+        f"• Vencimento: dia {dia}\n\n"
+        f"Qualquer dúvida, é só chamar."
+    )
 
 
 def _baixa_manual(payload: dict) -> str:
@@ -190,6 +264,8 @@ def _baixa_manual(payload: dict) -> str:
         return f"Vários clientes encontrados. Especifique: {[c.get('nome') for c in candidatos]}"
     c = candidatos[0]
     valor_final = float(valor) if valor is not None else float(c.get("valor_mensalidade", 0))
+    if valor_final < 0:
+        return "Valor do pagamento não pode ser negativo."
     supabase.table("transacoes").insert({
         "cliente_id": c["id"],
         "valor": valor_final,
@@ -197,7 +273,10 @@ def _baixa_manual(payload: dict) -> str:
         "status_nota_fiscal": "pendente",
         "hash_bancario": None,
     }).execute()
-    return f"Baixa registrada: {c.get('nome')} - R$ {valor_final:.2f} em {data_pag}."
+    return (
+        f"✅ _Baixa confirmada!_\n\n"
+        f"Pagamento de *{c.get('nome')}* registrado: R$ {valor_final:.2f} em {data_pag}."
+    )
 
 
 def _validar_token_webhook(request: Request) -> None:
@@ -253,13 +332,47 @@ async def webhook_whatsapp(request: Request):
     resposta = resultado.get("resposta", "")
 
     if "cadastrar_cliente" in resultado:
-        resposta = _cadastrar_cliente(resultado["cadastrar_cliente"])
+        try:
+            resposta = _cadastrar_cliente(resultado["cadastrar_cliente"])
+        except httpx.HTTPStatusError as e:
+            try:
+                body = e.response.json()
+                msg = body.get("message") or body.get("details") or e.response.text
+            except Exception:
+                msg = e.response.text or str(e)
+            resposta = f"Erro ao cadastrar cliente: {msg}"
     elif "baixa_manual" in resultado:
-        resposta = _baixa_manual(resultado["baixa_manual"])
+        try:
+            resposta = _baixa_manual(resultado["baixa_manual"])
+        except httpx.HTTPStatusError as e:
+            try:
+                body = e.response.json()
+                msg = body.get("message") or body.get("details") or e.response.text
+            except Exception:
+                msg = e.response.text or str(e)
+            resposta = f"Erro ao dar baixa: {msg}"
 
     # Envio da resposta de volta ao WhatsApp via Z-API send-text
     phone = _extrair_phone_resposta(body)
+    if not phone and resposta:
+        # Log para debug: Z-API envia "phone" na raiz (ex.: "5544999999999"); em grupo pode vir "phone": "55...-group"
+        logger.warning(
+            "Webhook: número não encontrado no payload. Campos do body: phone=%s participantPhone=%s from=%s senderPhone=%s isGroup=%s type=%s keys=%s",
+            body.get("phone"),
+            body.get("participantPhone"),
+            body.get("from"),
+            body.get("senderPhone"),
+            body.get("isGroup"),
+            body.get("type"),
+            list(body.keys()),
+        )
     if phone and resposta:
-        _enviar_zapi_text(phone, resposta)
+        logger.info("Webhook: enviando resposta ao WhatsApp para phone=%s (resposta com %d chars)", phone[:10] + "..." if len(phone) > 10 else phone, len(resposta))
+        ok = _enviar_zapi_text(phone, resposta)
+        if not ok:
+            logger.warning(
+                "Webhook: falha ao enviar resposta ao WhatsApp (phone=%s). Confira no Railway: ZAPI_BASE_URL ou ZAPI_INSTANCE_ID+ZAPI_INSTANCE_TOKEN e ZAPI_CLIENT_TOKEN (obrigatório na Z-API).",
+                phone[:8] + "..." if len(phone) > 8 else phone,
+            )
 
     return {"ok": True, "resposta": resposta}

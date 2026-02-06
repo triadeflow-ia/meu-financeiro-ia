@@ -14,9 +14,13 @@ Copie `backend/.env.example` para `backend/.env` e preencha:
 | `SUPABASE_URL` | Sim | URL do projeto Supabase (ex.: `https://xxx.supabase.co`) |
 | `SUPABASE_KEY` | Sim | Chave service_role (ou anon) do Supabase |
 | `OPENAI_API_KEY` | Sim (webhook) | Chave da OpenAI para GPT e Whisper |
-| `ZAPI_BASE_URL` | Sim (resposta WhatsApp) | Base da instância Z-API, sem `/send-text` (ex.: `https://api.z-api.io/instances/XXX/token/YYY`) |
-| `ZAPI_CLIENT_TOKEN` | Não | Token Z-API (header Client-Token), se exigido pela conta |
+| `ZAPI_BASE_URL` | Uma das opções* | URL base da instância Z-API, **sem** `/send-text` no final |
+| `ZAPI_INSTANCE_ID` | Uma das opções* | ID da instância (ex.: `3EE52809B2674111E65B0A9F1770609E`) – use junto com `ZAPI_INSTANCE_TOKEN` |
+| `ZAPI_INSTANCE_TOKEN` | Uma das opções* | Token da instância (ex.: `0979A3F00E3994A164770964`) – use junto com `ZAPI_INSTANCE_ID` |
+| `ZAPI_CLIENT_TOKEN` | Não | **Client Token** da Z-API (header Client-Token) – cole o valor que a Z-API mostra na conta |
 | `ZAPI_SECURITY_TOKEN` | Não | Se definido, o webhook exige header `X-ZAPI-Security-Token` ou `Client-Token` com este valor |
+
+\* Para envio de resposta no WhatsApp: defina **ou** `ZAPI_BASE_URL` **ou** o par `ZAPI_INSTANCE_ID` + `ZAPI_INSTANCE_TOKEN`. No Railway é prático usar ID e token separados.
 | `CORS_ORIGINS` | Se front em outro domínio | URLs do frontend separadas por vírgula (ex.: `https://meu-app.vercel.app`) |
 | `SANTANDER_EXTRATO_URL` | Não | URL do extrato Santander sandbox (certificados em `backend/certs/`) |
 
