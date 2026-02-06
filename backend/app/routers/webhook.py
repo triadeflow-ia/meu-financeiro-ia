@@ -90,11 +90,9 @@ def _extrair_phone_resposta(body: dict) -> str | None:
     Extrai o número/chat para enviar a resposta.
     Doc Z-API (on-message-received): phone = "Phone number or group that sent the message" (raiz do payload).
     Em grupo: phone = "5544999999999-group"; em direto: phone = "5544999999999".
-    Ignora mensagens fromMe.
+    Inclui fromMe: true (assistente no próprio número responde para o mesmo chat).
     """
     try:
-        if body.get("fromMe") is True:
-            return None
         # Doc Z-API: campo "phone" na raiz; fallbacks para outros formatos
         phone = (
             body.get("phone")  # oficial: "Phone number or group that sent the message"

@@ -62,17 +62,30 @@ Resumo com base em [developer.z-api.io](https://developer.z-api.io) para webhook
 
 ---
 
-## 3. Variáveis de ambiente (backend)
+## 3. Os dois tipos de autenticação (doc Z-API)
 
-| Variável | Uso |
-|----------|-----|
-| `ZAPI_BASE_URL` | URL base **sem** `/send-text`. Ex.: `https://api.z-api.io/instances/ID/token/TOKEN` |
-| `ZAPI_INSTANCE_ID` + `ZAPI_INSTANCE_TOKEN` | Alternativa: o backend monta a base com esses dois. |
-| `ZAPI_CLIENT_TOKEN` | Token de segurança (header `Client-Token`). Obrigatório se a opção estiver ativada na Z-API. |
+A Z-API usa **dois** identificadores; os dois são necessários quando o token de segurança da conta está ativado:
+
+| Onde | Nome na doc | O que é | Onde pegar |
+|------|-------------|---------|------------|
+| **URL** | ID e Token da instância | Identificam a **instância** (sua conexão WhatsApp). Formam a URL: `.../instances/ID/token/TOKEN/send-text` | Painel Z-API → sua instância → Editar (ID da instância + Token da instância) |
+| **Header** | Client-Token (Account security token) | Token de **segurança da conta**. Não é o token da instância. | Painel Z-API → **Segurança** → Token de segurança da conta → Configurar / Gerar |
+
+**Importante:** o valor que vai na URL (token da instância) **não** é o mesmo que vai no header `Client-Token`. Se você colocar o token da instância no Client-Token, a API responde 403 "Client-Token ... not allowed".
 
 ---
 
-## 4. Referências
+## 4. Variáveis de ambiente (backend)
+
+| Variável | Uso (onde entra) |
+|----------|-------------------|
+| `ZAPI_BASE_URL` | URL completa da instância **sem** `/send-text`. Ex.: `https://api.z-api.io/instances/ID_INSTANCIA/token/TOKEN_DA_INSTANCIA` → usa **ID + token da instância**. |
+| `ZAPI_INSTANCE_ID` + `ZAPI_INSTANCE_TOKEN` | Alternativa: o backend monta a URL com esses dois (id e token **da instância**). |
+| `ZAPI_CLIENT_TOKEN` | Header `Client-Token`. Valor = **Token de segurança da conta** (Segurança no painel), **não** o token da instância. |
+
+---
+
+## 5. Referências
 
 - [Send plain text](https://developer.z-api.io/en/message/send-message-text)
 - [Webhook on message received](https://developer.z-api.io/en/webhooks/on-message-received)
