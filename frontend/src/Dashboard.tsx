@@ -9,9 +9,24 @@ import {
   deleteCliente,
   type Cliente,
   type DashboardKPIs,
+  type ClientePayload,
 } from './App'
 import { Toast, type ToastType } from './Toast'
 import { getSupabaseClient } from './lib/supabase'
+
+export type ModalFormState = {
+  nome: string
+  documento_cpf_cnpj: string
+  valor_mensalidade: number
+  dia_vencimento: number
+}
+
+const emptyForm: ModalFormState = {
+  nome: '',
+  documento_cpf_cnpj: '',
+  valor_mensalidade: 0,
+  dia_vencimento: 10,
+}
 
 function Badge({ status }: { status: 'pago' | 'pendente' | 'atrasado' }) {
   const styles: Record<string, string> = {
@@ -103,6 +118,123 @@ function Spinner() {
   )
 }
 
+function ModalCliente({
+  open,
+  onClose,
+  initial,
+  onSubmit,
+  submitting,
+}: {
+  open: boolean
+  onClose: () => void
+  initial: ModalFormState
+  onSubmit: (data: ModalFormState) => Promise<void>
+  submitting: boolean
+}) {
+  const [form, setForm] = useState<ModalFormState>(initial)
+
+  useEffect(() => {
+    if (open) setForm(initial)
+  }, [open, initial])
+
+  if (!open) return null
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    onSubmit(form)
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/60" aria-hidden onClick={onClose} />
+      <div className="relative w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-900 shadow-xl">
+        <div className="border-b border-zinc-800 px-5 py-4">
+          <h3 className="text-lg font-semibold text-white">
+            {initial.nome ? 'Editar cliente' : 'Novo cliente'}
+          </h3>
+        </div>
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <div>
+            <label htmlFor="modal-nome" className="mb-1 block text-sm font-medium text-zinc-300">
+              Nome
+            </label>
+            <input
+              id="modal-nome"
+              type="text"
+              required
+              value={form.nome}
+              onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
+              className="w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-white placeholder-zinc-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              placeholder="Nome do cliente"
+            />
+          </div>
+          <div>
+            <label htmlFor="modal-doc" className="mb-1 block text-sm font-medium text-zinc-300">
+              CPF/CNPJ
+            </label>
+            <input
+              id="modal-doc"
+              type="text"
+              value={form.documento_cpf_cnpj}
+              onChange={(e) => setForm((f) => ({ ...f, documento_cpf_cnpj: e.target.value }))}
+              className="w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-white placeholder-zinc-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              placeholder="Opcional"
+            />
+          </div>
+          <div>
+            <label htmlFor="modal-valor" className="mb-1 block text-sm font-medium text-zinc-300">
+              Valor mensalidade (R$)
+            </label>
+            <input
+              id="modal-valor"
+              type="number"
+              min={0}
+              step={0.01}
+              required
+              value={form.valor_mensalidade || ''}
+              onChange={(e) => setForm((f) => ({ ...f, valor_mensalidade: Number(e.target.value) || 0 }))}
+              className="w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-white placeholder-zinc-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              placeholder="0,00"
+            />
+          </div>
+          <div>
+            <label htmlFor="modal-dia" className="mb-1 block text-sm font-medium text-zinc-300">
+              Dia de vencimento (1–28)
+            </label>
+            <input
+              id="modal-dia"
+              type="number"
+              min={1}
+              max={28}
+              required
+              value={form.dia_vencimento}
+              onChange={(e) => setForm((f) => ({ ...f, dia_vencimento: Number(e.target.value) || 10 }))}
+              className="w-full rounded-lg border border-zinc-600 bg-zinc-800 px-3 py-2 text-white placeholder-zinc-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg border border-zinc-600 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {submitting && <Spinner />}
+              {submitting ? 'Salvando…' : 'Salvar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 export function Dashboard() {
   const [clientes, setClientes] = useState<Cliente[]>([])
   const [kpis, setKpis] = useState<DashboardKPIs | null>(null)
@@ -116,6 +248,7 @@ export function Dashboard() {
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editingCliente, setEditingCliente] = useState<Cliente | null>(null)
+  const [modalForm, setModalForm] = useState<ModalFormState>(emptyForm)
   const [submitting, setSubmitting] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -143,34 +276,96 @@ export function Dashboard() {
     load()
   }, [load])
 
-  // Supabase Realtime: atualiza lista e KPIs quando clientes ou transacoes mudam (ex.: cadastro via WhatsApp).
-  // Requer VITE_SUPABASE_URL e VITE_SUPABASE_ANON_KEY no .env e tabelas clientes/transacoes na publicação Realtime (Supabase > Database > Replication).
   useEffect(() => {
     const supabase = getSupabaseClient()
     if (!supabase) return
-
     const channel = supabase
       .channel('dashboard-db-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'clientes' },
-        () => {
-          loadRef.current?.(false)
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'transacoes' },
-        () => {
-          loadRef.current?.(false)
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clientes' }, () => {
+        loadRef.current?.(false)
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transacoes' }, () => {
+        loadRef.current?.(false)
+      })
       .subscribe()
-
     return () => {
       supabase.removeChannel(channel)
     }
   }, [])
+
+  const openNewModal = useCallback(() => {
+    setModalForm(emptyForm)
+    setEditingCliente(null)
+    setModalOpen(true)
+  }, [])
+
+  const openEditModal = useCallback((c: Cliente) => {
+    setModalForm({
+      nome: c.nome,
+      documento_cpf_cnpj: c.documento_cpf_cnpj ?? '',
+      valor_mensalidade: c.valor_mensalidade,
+      dia_vencimento: c.dia_vencimento,
+    })
+    setEditingCliente(c)
+    setModalOpen(true)
+  }, [])
+
+  const closeModal = useCallback(() => {
+    setModalOpen(false)
+    setEditingCliente(null)
+    setModalForm(emptyForm)
+  }, [])
+
+  const handleSubmitCliente = useCallback(
+    async (data: ModalFormState) => {
+      setSubmitting(true)
+      try {
+        const payload: ClientePayload = {
+          nome: data.nome.trim(),
+          documento_cpf_cnpj: data.documento_cpf_cnpj.trim() || null,
+          valor_mensalidade: Number(data.valor_mensalidade) || 0,
+          dia_vencimento: Math.min(28, Math.max(1, Number(data.dia_vencimento) || 10)),
+        }
+        if (editingCliente) {
+          await updateCliente(editingCliente.id, payload)
+          setToast({ type: 'success', message: 'Cliente atualizado com sucesso.' })
+        } else {
+          await createCliente({ ...payload, status_ativo: true })
+          setToast({ type: 'success', message: 'Cliente cadastrado com sucesso.' })
+        }
+        await load()
+        closeModal()
+      } catch (e) {
+        setToast({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Erro ao salvar cliente.',
+        })
+      } finally {
+        setSubmitting(false)
+      }
+    },
+    [editingCliente, load, closeModal]
+  )
+
+  const handleExcluir = useCallback(
+    async (c: Cliente) => {
+      if (!window.confirm(`Excluir o cliente "${c.nome}"?`)) return
+      setDeletingId(c.id)
+      try {
+        await deleteCliente(c.id)
+        setToast({ type: 'success', message: 'Cliente excluído.' })
+        await load()
+      } catch (e) {
+        setToast({
+          type: 'error',
+          message: e instanceof Error ? e.message : 'Erro ao excluir.',
+        })
+      } finally {
+        setDeletingId(null)
+      }
+    },
+    [load]
+  )
 
   const handleSincronizar = async () => {
     setError(null)
@@ -202,8 +397,10 @@ export function Dashboard() {
       a.download = 'contabilidade.csv'
       a.click()
       URL.revokeObjectURL(url)
+      setToast({ type: 'success', message: 'CSV exportado.' })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erro ao exportar')
+      setToast({ type: 'error', message: e instanceof Error ? e.message : 'Erro ao exportar' })
     } finally {
       setExporting(false)
     }
@@ -380,8 +577,7 @@ export function Dashboard() {
         <ModalCliente
           open={modalOpen}
           onClose={closeModal}
-          editing={editingCliente}
-          initial={modalInitial}
+          initial={modalForm}
           onSubmit={handleSubmitCliente}
           submitting={submitting}
         />
