@@ -1,96 +1,127 @@
 # Relatório de Auditoria Completo – meu-financeiro-ia
 
 **Data:** 7 de fevereiro de 2026  
-**Objetivo:** Documento para auditoria do projeto completo, em conjunto com IA ou equipe. Inclui o que foi feito, testes executados, resultados e itens pendentes.
+**Objetivo:** Documento único para qualquer IA ou equipe entender **tudo** que existe no projeto: estrutura, stack, rotas, banco, integrações, variáveis, deploy, testes e estado atual.
 
 ---
 
-## 1. Visão geral do projeto
+## 1. Visão geral
 
-| Item | Descrição |
-|------|-----------|
+| Item | Valor |
+|------|--------|
 | **Nome** | meu-financeiro-ia (Gestão Financeira Inteligente) |
 | **Tipo** | MVP full-stack |
-| **Stack** | React (Vite) + Tailwind CSS · Python (FastAPI) · Supabase (PostgreSQL) · Z-API (WhatsApp) · OpenAI (GPT + Whisper) · Santander (mTLS, opcional) |
-| **Repositório** | Raiz: `meu-financeiro-ia/` com `backend/`, `frontend/`, `supabase/`, `docs/` |
+| **Backend** | Python 3.x, FastAPI, Uvicorn |
+| **Frontend** | React 18, Vite 5, TypeScript, Tailwind CSS |
+| **Banco** | Supabase (PostgreSQL) |
+| **Integrações** | Z-API (WhatsApp), OpenAI (GPT-4o + Whisper), Santander (mTLS, opcional) |
+| **Deploy backend** | Railway (`meu-financeiro-ia-production.up.railway.app`) |
+| **URL da API** | `https://meu-financeiro-ia-production.up.railway.app/api` |
 
-**Funcionalidades principais:**
+**O que o sistema faz:**
 
-- Cadastro e listagem de clientes (mensalidade, vencimento, status).
-- Transações (pagamentos) com status de nota fiscal.
-- Webhook WhatsApp: recebe mensagens (Z-API), processa com OpenAI (texto/áudio), cadastra cliente ou dá baixa manual e **envia resposta de volta** via Z-API send-text.
-- Dashboard: KPIs (total recebido, notas a emitir, inadimplentes), tabela com badges (Pago/Pendente/Atrasado), Sincronizar Santander, Exportar CSV.
-- CRUD de clientes na UI (Novo Cliente, Editar, Excluir) – implementado no backend; frontend com erros de build (ver seção 5).
+- Cadastro e listagem de **clientes** (nome, documento, mensalidade, dia de vencimento 1–28, status ativo).
+- **Transações** (pagamentos) por cliente, com status de nota fiscal (pendente/emitida/cancelada) e anti-duplicidade por `hash_bancario`.
+- **Dashboard:** KPIs (total recebido no mês, notas a emitir, clientes inadimplentes); tabela de clientes com status Pago/Pendente/Atrasado; CRUD completo (Novo, Editar, Excluir); Sincronizar Santander; Exportar CSV para contabilidade.
+- **Webhook WhatsApp (Z-API):** recebe mensagens (texto ou áudio), processa com OpenAI (cadastrar cliente ou baixa manual), envia a resposta de volta no WhatsApp via Z-API send-text (dois tokens: URL da instância + Client-Token de segurança da conta).
+- **Frontend** com dark mode (zinc-950/900), modal de cliente, Toast, Skeleton, Supabase Realtime opcional.
 
 ---
 
-## 2. Estrutura de pastas e arquivos principais
+## 2. Estrutura completa do repositório
 
 ```
 meu-financeiro-ia/
-├── backend/                    # FastAPI
+├── backend/                          # API FastAPI
 │   ├── app/
-│   │   ├── main.py            # App FastAPI, CORS, rotas
-│   │   ├── config.py          # Settings (Pydantic)
-│   │   ├── db.py              # Cliente REST Supabase
+│   │   ├── main.py                   # FastAPI app, CORS, inclusão dos routers
+│   │   ├── config.py                 # Settings (Pydantic), lê .env
+│   │   ├── db.py                     # Cliente REST Supabase (httpx)
 │   │   ├── routers/
-│   │   │   ├── clientes.py    # CRUD clientes, dashboard, export
-│   │   │   ├── webhook.py     # POST /api/webhook/whatsapp (Z-API + OpenAI)
-│   │   │   ├── bank.py        # POST /api/bank/sync (Santander mTLS)
-│   │   │   └── santander.py   # Legado sincronizar
-│   │   ├── api/bank_sync.py   # Lógica match PIX → transacoes
-│   │   ├── models/schemas.py
-│   │   ├── middleware/api_key.py
-│   │   └── santander_api.py
-│   ├── testar_conexao.py      # Teste Supabase
-│   ├── testar_openai.py       # Teste OpenAI
-│   ├── testar_webhook_zapi.py # Teste webhook (backend precisa estar rodando)
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── railway.json           # Deploy Railway (root = backend)
-├── frontend/                  # React + Vite + Tailwind
-│   └── src/
-│       ├── App.tsx            # API baseURL, funções fetch
-│       ├── Dashboard.tsx       # KPIs, tabela, modal CRUD, Skeleton, Toast
-│       ├── Toast.tsx
-│       └── lib/supabase.ts     # Realtime (opcional)
+│   │   │   ├── clientes.py           # CRUD, dashboard, export CSV
+│   │   │   ├── webhook.py            # POST /api/webhook/whatsapp (Z-API + OpenAI + send-text)
+│   │   │   ├── bank.py               # POST /api/bank/sync (Santander mTLS)
+│   │   │   └── santander.py          # POST /api/santander/sincronizar (legado)
+│   │   ├── api/
+│   │   │   └── bank_sync.py          # Lógica: extrato PIX, match com clientes, inserção transacoes
+│   │   ├── models/
+│   │   │   └── schemas.py            # ClienteCreate, ClienteUpdate, ClienteResponse, etc.
+│   │   ├── middleware/
+│   │   │   └── api_key.py            # Exige X-API-KEY em /api/* (exceto webhook) se API_KEY definido
+│   │   └── santander_api.py         # mTLS, normalização do extrato Santander
+│   ├── conexao_banco.py              # Cliente mTLS Santander (certs em backend/certs/)
+│   ├── testar_conexao.py             # Script: testa Supabase (clientes)
+│   ├── testar_openai.py              # Script: testa OpenAI (gpt-4o-mini)
+│   ├── testar_webhook_zapi.py        # Script: POST simulado para webhook (backend em 8000)
+│   ├── requirements.txt              # fastapi, uvicorn, httpx, pydantic, pydantic-settings, openai, etc.
+│   ├── Dockerfile                    # Build da API
+│   ├── railway.json                  # Deploy: root = backend
+│   └── certs/                        # privada.key + certificado Santander (não commitados)
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx                   # Rotas base API, fetchClientes, fetchDashboardKPIs, createCliente, updateCliente, deleteCliente, bankSync, exportContabilidade
+│   │   ├── Dashboard.tsx             # KPIs, tabela clientes, modal CRUD (ModalCliente), Toast, Skeleton, Realtime
+│   │   ├── Toast.tsx                 # Componente Toast (sucesso/erro)
+│   │   ├── main.tsx                  # React root
+│   │   ├── index.css                 # Estilos globais + Tailwind
+│   │   ├── Dashboard.css             # (opcional)
+│   │   ├── vite-env.d.ts
+│   │   └── lib/
+│   │       └── supabase.ts           # Cliente Supabase para Realtime (VITE_SUPABASE_*)
+│   ├── index.html
+│   ├── package.json                  # react, vite, tailwind, typescript, @supabase/supabase-js
+│   ├── vite.config.ts                # Proxy /api -> backend
+│   ├── tailwind.config.js
+│   ├── tsconfig.json
+│   └── Dockerfile                    # Build estático + nginx
 ├── supabase/
-│   ├── schema.sql             # Definição clientes + transacoes
+│   ├── schema.sql                    # Definição canônica: clientes + transacoes + índices
 │   └── migrations/
 │       ├── 001_clientes_transacoes.sql
 │       ├── 002_add_missing_columns_clientes.sql
-│       ├── 003_recriar_tabelas_do_zero.sql
-│       ├── 004_enable_rls.sql
-│       └── 005_add_validation_constraints.sql
+│       ├── 003_recriar_tabelas_do_zero.sql   # DROP + CREATE (cuidado: apaga dados)
+│       ├── 004_enable_rls.sql                 # RLS em clientes e transacoes
+│       └── 005_add_validation_constraints.sql # CHECK valor_mensalidade >= 0, valor >= 0
 ├── docs/
-│   └── Z-API-INTEGRACAO.md    # Webhook + send-text + dois tokens
-├── ENV-VARS.md                # Variáveis backend/frontend
-├── VALIDAR-SOLUCAO.md        # Passo a passo de validação
-├── PASSO-A-PASSO-RAILWAY.md   # Root Directory no Railway
-├── RELATORIO-AUDITORIA-MVP.md # Auditoria anterior (fev/2026)
-└── RELATORIO-AUDITORIA-COMPLETO.md  # Este arquivo
+│   └── Z-API-INTEGRACAO.md           # Webhook, send-text, dois tokens (URL + Client-Token)
+├── .env.example                      # Referência build front (Docker)
+├── .gitignore
+├── docker-compose.yml                # Backend + front (nginx)
+├── README.md                         # Visão geral, configuração, Docker
+├── ENV-VARS.md                       # Tabela de variáveis backend/frontend
+├── VALIDAR-SOLUCAO.md                # Passo a passo: backend no ar, webhook 200, cadastro, WhatsApp
+├── PASSO-A-PASSO-RAILWAY.md          # Configurar Root Directory = backend no Railway
+├── DEPLOY-RAILWAY.md
+├── PROMPT-INTEGRACAO-GOOGLE-AI-STUDIO.md  # Prompt para outro front (ex.: Google AI Studio) usar esta API
+├── RELATORIO-AUDITORIA-MVP.md        # Auditoria anterior (entregas vs pedido)
+├── RELATORIO-AUDITORIA-COMPLETO.md   # Este arquivo
+├── SUPABASE-400.md                   # Troubleshooting Supabase
+└── (outros .md conforme necessário)
 ```
 
 ---
 
-## 3. API Backend (rotas)
+## 3. API Backend – Todas as rotas
 
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| GET | `/` | Mensagem + link docs |
-| GET | `/health` | Healthcheck (Railway) |
-| GET | `/api/clientes` | Lista clientes com status_pagamento |
-| GET | `/api/clientes/dashboard` | KPIs (total recebido, notas a emitir, inadimplentes) |
-| GET | `/api/clientes/export/contabilidade` | CSV export |
-| GET | `/api/clientes/{id}` | Um cliente |
-| POST | `/api/clientes` | Criar cliente |
-| PATCH | `/api/clientes/{id}` | Atualizar cliente |
-| DELETE | `/api/clientes/{id}` | Excluir cliente |
-| POST | `/api/bank/sync` | Sincronizar Santander (mTLS, match PIX) |
-| POST | `/api/santander/sincronizar` | Legado Santander |
-| POST | `/api/webhook/whatsapp` | Webhook Z-API (recebe mensagem, OpenAI, envia resposta Z-API) |
+| Método | Rota | Descrição | Body (se aplicável) |
+|--------|------|-----------|----------------------|
+| GET | `/` | Mensagem + link /docs | — |
+| GET | `/health` | Healthcheck (Railway) | — |
+| GET | `/api/clientes` | Lista todos os clientes com status_pagamento (pago/pendente/atrasado) | — |
+| GET | `/api/clientes/dashboard` | KPIs: total_recebido, notas_a_emitir, clientes_inadimplentes | — |
+| GET | `/api/clientes/export/contabilidade` | CSV: Data, Cliente, Valor, Documento (StreamingResponse) | — |
+| GET | `/api/clientes/{id}` | Um cliente por UUID | — |
+| POST | `/api/clientes` | Criar cliente | JSON: nome, documento_cpf_cnpj?, valor_mensalidade, dia_vencimento (1-28), status_ativo? |
+| PATCH | `/api/clientes/{id}` | Atualizar cliente (parcial) | JSON: qualquer subconjunto dos campos do cliente |
+| DELETE | `/api/clientes/{id}` | Excluir cliente | — (204 sem body) |
+| POST | `/api/bank/sync` | Sincronizar Santander (mTLS, extrato, match PIX → transacoes) | — |
+| POST | `/api/santander/sincronizar` | Legado Santander | — |
+| POST | `/api/webhook/whatsapp` | Webhook Z-API: recebe payload (texto/áudio), OpenAI, cadastra/baixa, envia resposta Z-API send-text | JSON: payload Z-API (phone, text.message, fromMe, etc.) |
 
-**Autenticação:** Middleware `APIKeyMiddleware` (header `X-API-KEY` se `API_KEY` estiver definido). Rotas `/api/*` exigem a chave nesse caso; `/api/webhook/whatsapp` pode ter validação adicional via `ZAPI_SECURITY_TOKEN`.
+**Autenticação:**
+
+- Se `API_KEY` estiver definido no backend: todas as rotas `/api/*` (exceto `/api/webhook/whatsapp`) exigem header **X-API-KEY** com o mesmo valor; caso contrário 401.
+- Webhook: se `ZAPI_SECURITY_TOKEN` estiver definido, exige header **X-ZAPI-Security-Token** ou **Client-Token** com esse valor.
 
 ---
 
@@ -98,128 +129,80 @@ meu-financeiro-ia/
 
 **Tabelas:**
 
-- **clientes:** id (uuid), nome, documento_cpf_cnpj, valor_mensalidade, dia_vencimento (1–28), status_ativo, created_at, updated_at.  
-  Constraints: `valor_mensalidade >= 0` (migration 005).
-- **transacoes:** id, cliente_id (FK), valor, data_pagamento, status_nota_fiscal (pendente/emitida/cancelada), hash_bancario, created_at.  
-  Constraints: `valor >= 0`, unique(cliente_id, data_pagamento). (migration 005.)
+- **clientes:** id (uuid PK), nome (text), documento_cpf_cnpj (text nullable), valor_mensalidade (numeric), dia_vencimento (smallint 1–28), status_ativo (boolean), created_at, updated_at. Constraint: valor_mensalidade >= 0.
+- **transacoes:** id (uuid PK), cliente_id (FK clientes), valor (numeric), data_pagamento (date), status_nota_fiscal (pendente|emitida|cancelada), hash_bancario (text), created_at. Unique (cliente_id, data_pagamento). Constraint: valor >= 0.
 
-**Migrações aplicáveis (em ordem):**
+**Migrações (ordem):** 001 → 002 → 003 (recriar do zero) → 004 (RLS) → 005 (CHECKs).
 
-1. `001` – criação inicial (ou alterações incrementais).
-2. `002` – colunas adicionais em clientes.
-3. `003` – **recriar do zero** (DROP + CREATE) – atenção: apaga dados.
-4. `004` – habilitar RLS em clientes e transacoes (backend com service_role ignora RLS).
-5. `005` – CHECK valor_mensalidade >= 0 e valor >= 0.
-
-**Schema de referência:** `supabase/schema.sql`.
+**Backend:** usa `SUPABASE_URL` e `SUPABASE_KEY` (service_role); service_role ignora RLS.
 
 ---
 
-## 5. Testes executados (data do relatório)
+## 5. Variáveis de ambiente
 
-### 5.1 Scripts de teste (backend)
+**Backend (Railway / backend/.env):**
 
-| Teste | Comando | Resultado | Observação |
-|-------|---------|-----------|------------|
-| **Conexão Supabase** | `cd backend && python testar_conexao.py` | **OK** | SUPABASE_URL e SUPABASE_KEY do `.env`; tabela `clientes` acessível; amostra de 1 registro. |
-| **Conexão OpenAI** | `cd backend && python testar_openai.py` | **OK** | OPENAI_API_KEY válida; modelo gpt-4o-mini respondeu. |
-| **Webhook Z-API** | `cd backend && python testar_webhook_zapi.py` | **Não executado** | Requer backend rodando em `http://127.0.0.1:8000`. No ambiente de auditoria o uvicorn não subiu (falta de `pydantic_settings` no ambiente global; uso de venv recomendado). |
-| **Import do app FastAPI** | `python -c "from app.main import app"` (na pasta backend, sem venv) | **Falha** | `ModuleNotFoundError: pydantic_settings`. Com `pip install -r requirements.txt` em um venv, o import deve funcionar. |
+- **Obrigatórias:** SUPABASE_URL, SUPABASE_KEY, OPENAI_API_KEY (para webhook).
+- **Z-API (envio no WhatsApp):** ZAPI_BASE_URL **ou** (ZAPI_INSTANCE_ID + ZAPI_INSTANCE_TOKEN); ZAPI_CLIENT_TOKEN = token de **segurança da conta** (aba Segurança), não o token da instância.
+- **Opcionais:** API_KEY, ZAPI_SECURITY_TOKEN, CORS_ORIGINS, SANTANDER_EXTRATO_URL; certificados em backend/certs/.
 
-### 5.2 Build e ambiente
+**Frontend (build):**
 
-| Item | Comando / Verificação | Resultado | Observação |
-|------|------------------------|-----------|------------|
-| **Frontend build** | `cd frontend && npm run build` | **Falha** | Erros TypeScript em `Dashboard.tsx`: funções/componentes referenciados não definidos ou não utilizados (`openNewModal`, `openEditModal`, `handleExcluir`, `ModalCliente`, `closeModal`, `modalInitial`, `handleSubmitCliente`); variáveis declaradas e não usadas (`createCliente`, `updateCliente`, `deleteCliente`, `setModalOpen`, etc.). Corrigir implementação ou referências para o build passar. |
-| **Backend (venv)** | Não executado nesta auditoria | - | Recomendado: `python -m venv .venv`, ativar, `pip install -r requirements.txt`, `uvicorn app.main:app --port 8000`. |
+- VITE_API_URL (URL do backend se front em outro domínio), VITE_API_KEY (se backend usar API_KEY), VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY (Realtime).
 
-### 5.3 Resumo dos testes
-
-- **Passaram:** conexão Supabase, conexão OpenAI.
-- **Não executados / dependem de ambiente:** webhook local (backend rodando), health/rotas em produção.
-- **Falharam no ambiente de auditoria:** import do app sem venv, build do frontend (erros TS).
+Detalhes: **ENV-VARS.md** e **backend/.env.example**.
 
 ---
 
-## 6. O que foi implementado (resumo para auditoria)
+## 6. Frontend – Detalhes
 
-### 6.1 Backend
-
-- FastAPI com rotas de clientes (CRUD, dashboard, export CSV), bank/sync (Santander mTLS), webhook WhatsApp.
-- Webhook: recepção Z-API (texto e áudio), extração de `phone` conforme documentação (incluindo `fromMe` para responder no próprio número), interpretação com GPT-4o, cadastro de cliente e baixa manual com validação (nome, valor >= 0, dia 1–28, etc.).
-- Envio da resposta no WhatsApp: `_enviar_zapi_text(phone, resposta)` usando URL da instância (ZAPI_BASE_URL ou ZAPI_INSTANCE_ID + ZAPI_INSTANCE_TOKEN) e header **Client-Token** (ZAPI_CLIENT_TOKEN = token de **segurança da conta**, não o token da instância). Documentado em `docs/Z-API-INTEGRACAO.md` e `ENV-VARS.md`.
-- Validação no cadastro e na baixa (valores não negativos, dia 1–28, tamanhos de campo).
-- Middleware de API Key opcional; validação opcional de token do webhook (ZAPI_SECURITY_TOKEN).
-
-### 6.2 Banco (Supabase)
-
-- Schema e migrações 001–005: tabelas recriadas (003), RLS habilitado (004), constraints de valor não negativo (005).
-- Backend usa `SUPABASE_KEY` (service_role), que ignora RLS.
-
-### 6.3 Frontend
-
-- Dashboard com KPIs, tabela de clientes, badges de status, Skeleton e Toast.
-- Chamadas à API via funções em `App.tsx` (fetchClientes, fetchDashboardKPIs, bankSync, exportContabilidade, createCliente, updateCliente, deleteCliente).
-- Supabase Realtime opcional (comentado no código) para atualizar ao cadastrar via WhatsApp.
-- **Problema atual:** build quebrado por erros TypeScript em `Dashboard.tsx` (referências a funções/componentes inexistentes ou não conectados ao CRUD).
-
-### 6.4 Deploy e documentação
-
-- Railway: root directory `backend`, variáveis conforme `ENV-VARS.md` e `backend/.env.example`.
-- Documentação: README, ENV-VARS, Z-API (webhook + send-text + dois tokens), VALIDAR-SOLUCAO, PASSO-A-PASSO-RAILWAY, RELATORIO-AUDITORIA-MVP.
+- **App.tsx:** define API_BASE (VITE_API_URL ou /api), apiHeaders (X-API-KEY), exporta fetchClientes, fetchDashboardKPIs, createCliente, updateCliente, deleteCliente, bankSync, exportContabilidade e tipos Cliente, DashboardKPIs, ClientePayload.
+- **Dashboard.tsx:** estado (clientes, kpis, loading, modal, editingCliente, modalForm, submitting, deletingId, toast); load(); openNewModal, openEditModal, closeModal; handleSubmitCliente (create/update via App), handleExcluir (deleteCliente); ModalCliente (form Nome, Documento, Valor, Dia 1–28); tabela com Badge de status; Supabase Realtime (canal clientes + transacoes) para atualizar lista sem F5.
+- **Build:** `npm run build` (tsc + vite) passa sem erros.
 
 ---
 
-## 7. Itens pendentes / recomendações
+## 7. Webhook WhatsApp (resumo)
 
-| Prioridade | Item | Ação sugerida |
-|------------|------|----------------|
-| Alta | **Build do frontend** | Corrigir `Dashboard.tsx`: implementar ou ligar `openNewModal`, `openEditModal`, `handleExcluir`, `ModalCliente`, `closeModal`, `modalInitial`, `handleSubmitCliente`; remover ou usar variáveis não utilizadas para o TypeScript passar. |
-| Alta | **Teste webhook ponta a ponta** | Com backend no ar (venv + uvicorn), rodar `testar_webhook_zapi.py`; ou testar em produção (curl para Railway) conforme VALIDAR-SOLUCAO.md. |
-| Média | **Ambiente de testes** | Usar venv no backend e garantir `pip install -r requirements.txt` para todos os testes locais. |
-| Média | **Z-API em produção** | Confirmar no Railway: `ZAPI_CLIENT_TOKEN` = token da aba **Segurança** da Z-API (não o token da instância). |
-| Baixa | **Testes automatizados** | Introduzir pytest para rotas críticas (clientes, webhook com mock). |
-| Baixa | **Políticas RLS** | Se o frontend passar a usar chave anon + Supabase Auth, criar políticas para `authenticated`. |
+- **Entrada:** POST /api/webhook/whatsapp com payload Z-API (phone, text.message, fromMe, participantPhone, etc.). Áudio: transcreve com Whisper.
+- **Lógica:** OpenAI (GPT-4o) extrai intenção → cadastrar_cliente ou baixa_manual ou resposta livre. Validação (nome, valor >= 0, dia 1–28) antes de inserir.
+- **Resposta no WhatsApp:** extração do número de `body.phone` (prioridade) ou participantPhone, normalização com _normalizar_phone; POST para Z-API send-text com header Client-Token (ZAPI_CLIENT_TOKEN = token segurança da conta). URL da Z-API = ZAPI_BASE_URL ou montada com ZAPI_INSTANCE_ID + ZAPI_INSTANCE_TOKEN.
+
+Documentação completa: **docs/Z-API-INTEGRACAO.md**.
 
 ---
 
-## 8. Como reproduzir os testes (para sua IA ou equipe)
+## 8. Deploy e testes
 
-1. **Supabase:**  
-   `cd backend && python testar_conexao.py`  
-   (Requer `backend/.env` com SUPABASE_URL e SUPABASE_KEY.)
-
-2. **OpenAI:**  
-   `cd backend && python testar_openai.py`  
-   (Requer OPENAI_API_KEY no `.env`.)
-
-3. **Webhook (local):**  
-   Terminal 1: `cd backend && .venv\Scripts\activate && python -m uvicorn app.main:app --host 127.0.0.1 --port 8000`  
-   Terminal 2: `cd backend && python testar_webhook_zapi.py`
-
-4. **Webhook (produção):**  
-   Seguir VALIDAR-SOLUCAO.md (curl para `https://meu-financeiro-ia-production.up.railway.app/api/webhook/whatsapp`).
-
-5. **Frontend (após correções):**  
-   `cd frontend && npm run build`.
+- **Backend no Railway:** Root Directory = `backend`; variáveis conforme ENV-VARS.md. URL: meu-financeiro-ia-production.up.railway.app.
+- **Testes locais:**  
+  - `cd backend && python testar_conexao.py` (Supabase)  
+  - `cd backend && python testar_openai.py` (OpenAI)  
+  - `cd backend && python testar_webhook_zapi.py` (exige backend rodando em 127.0.0.1:8000)
+- **Validação em produção:** seguir **VALIDAR-SOLUCAO.md** (health, webhook 200, cadastro via curl, teste real WhatsApp).
 
 ---
 
-## 9. Referência rápida de variáveis (backend)
+## 9. Documentos de referência
 
-| Variável | Obrigatório | Uso |
-|----------|-------------|-----|
-| SUPABASE_URL | Sim | URL do projeto Supabase |
-| SUPABASE_KEY | Sim | Chave service_role (ou anon) |
-| OPENAI_API_KEY | Sim (webhook) | GPT e Whisper |
-| ZAPI_BASE_URL ou (ZAPI_INSTANCE_ID + ZAPI_INSTANCE_TOKEN) | Para envio no WhatsApp | URL da instância (ID + token da instância na URL) |
-| ZAPI_CLIENT_TOKEN | Se ativado na Z-API | Token de **segurança da conta** (header Client-Token) |
-| ZAPI_SECURITY_TOKEN | Não | Validação do webhook (header) |
-| API_KEY | Não | Header X-API-KEY nas rotas /api/ |
-| CORS_ORIGINS | Não | Origens adicionais CORS |
-
-Detalhes: `ENV-VARS.md` e `backend/.env.example`.
+| Arquivo | Conteúdo |
+|---------|----------|
+| README.md | Visão geral, estrutura, configuração local, Docker |
+| ENV-VARS.md | Variáveis backend e frontend |
+| docs/Z-API-INTEGRACAO.md | Webhook Z-API, send-text, dois tokens |
+| VALIDAR-SOLUCAO.md | Passo a passo para validar que a solução funciona |
+| PASSO-A-PASSO-RAILWAY.md | Configurar Root Directory no Railway |
+| PROMPT-INTEGRACAO-GOOGLE-AI-STUDIO.md | Prompt para outro front (ex.: Google AI Studio) consumir esta API |
 
 ---
 
-*Fim do relatório de auditoria completa. Use este documento junto com RELATORIO-AUDITORIA-MVP.md e VALIDAR-SOLUCAO.md para uma auditoria completa do projeto.*
+## 10. Estado atual (fev/2026)
+
+- **Backend:** estável; webhook com extração de phone priorizando body.phone; validação no cadastro e na baixa; dois tokens Z-API documentados.
+- **Frontend:** CRUD completo; build OK; dark mode; modal e Toast.
+- **Banco:** schema e migrações 001–005 aplicáveis; RLS habilitado; CHECKs de valor.
+- **Pendências sugeridas:** testes automatizados (pytest); políticas RLS explícitas se front usar anon key; fluxo de emissão de notas (hoje só status e KPI).
+
+---
+
+*Este relatório contém tudo que uma IA ou desenvolvedor precisa para entender o projeto meu-financeiro-ia de ponta a ponta.*

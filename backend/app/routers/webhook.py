@@ -85,47 +85,63 @@ def _extrair_texto_zapi(body: dict) -> str:
         return ""
 
 
-def _normalizar_phone(phone_raw) -> str | None:
-    """Normaliza valor de phone (int, str, etc.) para string só dígitos ou ID de grupo."""
+def _limpar_texto_para_ia(texto: str) -> str:
+    """Remove espaços extras e normaliza o texto antes de enviar ao GPT (Cadastrar/Baixa)."""
+    if not texto or not isinstance(texto, str):
+        return ""
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+def _limpar_phone_zapi(phone_raw) -> str | None:
+    """
+    Limpa o valor de phone enviado pela Z-API.
+    Remove sufixos como @lid, @c.us, etc., e extrai apenas dígitos numéricos.
+    Ex.: "237666478092288@lid" -> "237666478092288"; "5511999999999-group" -> mantém para grupo.
+    """
     if phone_raw is None:
         return None
-    phone_str = str(phone_raw).strip()
-    if "@" in phone_str:
-        phone_str = phone_str.split("@")[0]
-    if "-group" in phone_str:
-        return phone_str if len(phone_str) >= 10 else None
-    digits = re.sub(r"\D", "", phone_str)
+    s = str(phone_raw).strip()
+    # Remove qualquer sufixo após @ (ex.: @lid, @c.us)
+    if "@" in s:
+        s = s.split("@")[0].strip()
+    if not s:
+        return None
+    # ID de grupo: formato com -group; enviar como está para send-text
+    if "-group" in s:
+        digits = re.sub(r"\D", "", s)
+        return s if len(digits) >= 10 else None
+    # Apenas dígitos (evita letras ou caracteres que quebrariam envio)
+    digits = re.sub(r"\D", "", s)
     return digits if len(digits) >= 10 else None
+
+
+def _normalizar_phone(phone_raw) -> str | None:
+    """Alias para _limpar_phone_zapi (retrocompatibilidade)."""
+    return _limpar_phone_zapi(phone_raw)
 
 
 def _extrair_phone_resposta(body: dict) -> str | None:
     """
     Extrai o número/chat para enviar a resposta.
-    Doc Z-API (on-message-received): phone = "Phone number or group that sent the message" (raiz do payload).
-    Em grupo: phone = "5544999999999-group"; em direto: phone = "5544999999999".
-    Z-API pode enviar phone como número (int) ou string; normalizamos para string de dígitos.
+    Z-API pode enviar phone com sufixo @lid (ex.: 237666478092288@lid).
+    Ordem: phone, participantPhone, connectedPhone, senderPhone, from, data.phone, payload.phone.
     """
-    try:
-        # Doc Z-API: campo "phone" na raiz (pode vir como int ou string); fallbacks
-        phone = (
-            body.get("phone")
-            or body.get("participantPhone")
-            or body.get("senderPhone")
-            or body.get("from")
-            or (body.get("data") or {}).get("phone")
-            or (body.get("payload") or {}).get("phone")
-        )
-        if phone is None:
-            return None
-        phone_str = str(phone).strip()
-        if "@" in phone_str:
-            phone_str = phone_str.split("@")[0]
-        if "-group" in phone_str or body.get("isGroup"):
-            return phone_str if len(phone_str) >= 10 else None
-        digits = re.sub(r"\D", "", phone_str)
-        return digits if len(digits) >= 10 else None
-    except Exception:
-        return None
+    candidates = [
+        body.get("phone"),
+        body.get("participantPhone"),
+        body.get("connectedPhone"),
+        body.get("senderPhone"),
+        body.get("from"),
+        (body.get("data") or {}).get("phone"),
+        (body.get("payload") or {}).get("phone"),
+    ]
+    for raw in candidates:
+        if raw is None:
+            continue
+        cleaned = _limpar_phone_zapi(raw)
+        if cleaned:
+            return cleaned
+    return None
 
 
 def _get_zapi_base_url() -> str:
@@ -209,33 +225,49 @@ def _openai_interpretar(texto: str) -> dict:
         return {"resposta": f"Erro ao processar: {e}"}
 
 
+def _to_float(val, default: float = 0.0) -> float:
+    """Converte para float de forma segura; evita enviar string com letras ao banco."""
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        return float(str(val).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(val, default: int = 10, min_val: int = 1, max_val: int = 28) -> int:
+    """Converte para int de forma segura e limita ao intervalo (ex.: dia 1-28)."""
+    if val is None:
+        return min(max_val, max(min_val, default))
+    if isinstance(val, int):
+        return min(max_val, max(min_val, val))
+    try:
+        return min(max_val, max(min_val, int(float(str(val).strip()))))
+    except (TypeError, ValueError):
+        return min(max_val, max(min_val, default))
+
+
 def _cadastrar_cliente(payload: dict) -> str:
-    """Valida os dados e insere no Supabase. Retorna mensagem de sucesso ou erro."""
+    """Valida os dados e insere no Supabase. Garante tipos numéricos (nunca string com letras)."""
     nome = (payload.get("nome") or "").strip()
     if not nome:
         return "Nome obrigatório."
     if len(nome) > 255:
         return "Nome muito longo."
-    try:
-        valor = float(payload.get("valor_mensalidade", 0))
-    except (TypeError, ValueError):
-        valor = 0.0
+    valor = _to_float(payload.get("valor_mensalidade"), 0.0)
     if valor < 0:
         return "Valor da mensalidade não pode ser negativo."
-    try:
-        dia = int(payload.get("dia_vencimento", 10))
-    except (TypeError, ValueError):
-        dia = 10
-    if dia < 1 or dia > 28:
-        return "Dia de vencimento deve ser entre 1 e 28."
+    dia = _to_int(payload.get("dia_vencimento"), 10, 1, 28)
     doc = (payload.get("documento_cpf_cnpj") or "").strip() or None
     if doc is not None and len(doc) > 20:
         return "CPF/CNPJ muito longo."
     row = {
         "nome": nome,
         "documento_cpf_cnpj": doc,
-        "valor_mensalidade": round(float(valor), 2),
-        "dia_vencimento": int(dia),
+        "valor_mensalidade": round(valor, 2),
+        "dia_vencimento": dia,
         "status_ativo": True,
     }
     supabase = get_supabase()
@@ -262,7 +294,6 @@ def _baixa_manual(payload: dict) -> str:
     nome_ou_doc = (payload.get("nome_ou_documento") or "").strip()
     if not nome_ou_doc:
         return "Informe o nome ou documento do cliente."
-    valor = payload.get("valor")
     data_pag = payload.get("data_pagamento") or str(date.today())
     r = supabase.table("clientes").select("id, nome, valor_mensalidade, documento_cpf_cnpj").execute()
     clientes = r.data or []
@@ -272,12 +303,14 @@ def _baixa_manual(payload: dict) -> str:
     if len(candidatos) > 1:
         return f"Vários clientes encontrados. Especifique: {[c.get('nome') for c in candidatos]}"
     c = candidatos[0]
-    valor_final = float(valor) if valor is not None else float(c.get("valor_mensalidade", 0))
+    valor_payload = payload.get("valor")
+    valor_default = _to_float(c.get("valor_mensalidade"), 0.0)
+    valor_final = _to_float(valor_payload, valor_default) if valor_payload is not None else valor_default
     if valor_final < 0:
         return "Valor do pagamento não pode ser negativo."
     supabase.table("transacoes").insert({
         "cliente_id": c["id"],
-        "valor": valor_final,
+        "valor": round(valor_final, 2),
         "data_pagamento": data_pag,
         "status_nota_fiscal": "pendente",
         "hash_bancario": None,
@@ -337,7 +370,8 @@ async def webhook_whatsapp(request: Request):
         if not texto:
             return {"ok": True, "message": "Áudio não transcrito"}
 
-    resultado = _openai_interpretar(texto)
+    texto_limpo = _limpar_texto_para_ia(texto)
+    resultado = _openai_interpretar(texto_limpo)
     resposta = resultado.get("resposta", "")
 
     if "cadastrar_cliente" in resultado:
@@ -362,13 +396,19 @@ async def webhook_whatsapp(request: Request):
             resposta = f"Erro ao dar baixa: {msg}"
 
     # Envio da resposta de volta ao WhatsApp via Z-API send-text
-    # Prioridade: phone na raiz (Z-API envia como int ou string), depois participantPhone, depois extração completa
-    phone = _normalizar_phone(body.get("phone")) or _normalizar_phone(body.get("participantPhone")) or _extrair_phone_resposta(body)
+    # Prioridade: phone (pode vir com @lid), participantPhone, connectedPhone, depois extração completa
+    phone = (
+        _limpar_phone_zapi(body.get("phone"))
+        or _limpar_phone_zapi(body.get("participantPhone"))
+        or _limpar_phone_zapi(body.get("connectedPhone"))
+        or _extrair_phone_resposta(body)
+    )
     if not phone and resposta:
         logger.warning(
-            "Webhook: número não encontrado no payload. Campos do body: phone=%s participantPhone=%s from=%s senderPhone=%s isGroup=%s type=%s keys=%s",
+            "Webhook: número não encontrado no payload. Campos do body: phone=%s participantPhone=%s connectedPhone=%s from=%s senderPhone=%s isGroup=%s type=%s keys=%s",
             body.get("phone"),
             body.get("participantPhone"),
+            body.get("connectedPhone"),
             body.get("from"),
             body.get("senderPhone"),
             body.get("isGroup"),
@@ -383,5 +423,9 @@ async def webhook_whatsapp(request: Request):
                 "Webhook: falha ao enviar resposta ao WhatsApp (phone=%s). Confira no Railway: ZAPI_BASE_URL ou ZAPI_INSTANCE_ID+ZAPI_INSTANCE_TOKEN e ZAPI_CLIENT_TOKEN (obrigatório na Z-API).",
                 phone[:8] + "..." if len(phone) > 8 else phone,
             )
+        else:
+            logger.info("Webhook: Processado com sucesso para o número %s", phone[:10] + "..." if len(phone) > 10 else phone)
+    elif phone and not resposta:
+        logger.info("Webhook: Processado com sucesso para o número %s (sem resposta a enviar)", phone[:10] + "..." if len(phone) > 10 else phone)
 
     return {"ok": True, "resposta": resposta}
