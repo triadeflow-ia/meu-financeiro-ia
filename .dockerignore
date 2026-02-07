@@ -1,0 +1,15 @@
+# Raiz: só precisamos do backend para o build
+.git
+.gitignore
+*.md
+frontend
+docs
+supabase
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/*.pyc
+**/.venv
+**/venv
+**/node_modules
