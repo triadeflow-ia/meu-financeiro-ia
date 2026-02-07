@@ -85,32 +85,43 @@ def _extrair_texto_zapi(body: dict) -> str:
         return ""
 
 
+def _normalizar_phone(phone_raw) -> str | None:
+    """Normaliza valor de phone (int, str, etc.) para string só dígitos ou ID de grupo."""
+    if phone_raw is None:
+        return None
+    phone_str = str(phone_raw).strip()
+    if "@" in phone_str:
+        phone_str = phone_str.split("@")[0]
+    if "-group" in phone_str:
+        return phone_str if len(phone_str) >= 10 else None
+    digits = re.sub(r"\D", "", phone_str)
+    return digits if len(digits) >= 10 else None
+
+
 def _extrair_phone_resposta(body: dict) -> str | None:
     """
     Extrai o número/chat para enviar a resposta.
     Doc Z-API (on-message-received): phone = "Phone number or group that sent the message" (raiz do payload).
     Em grupo: phone = "5544999999999-group"; em direto: phone = "5544999999999".
-    Inclui fromMe: true (assistente no próprio número responde para o mesmo chat).
+    Z-API pode enviar phone como número (int) ou string; normalizamos para string de dígitos.
     """
     try:
-        # Doc Z-API: campo "phone" na raiz; fallbacks para outros formatos
+        # Doc Z-API: campo "phone" na raiz (pode vir como int ou string); fallbacks
         phone = (
-            body.get("phone")  # oficial: "Phone number or group that sent the message"
-            or body.get("participantPhone")  # em grupo: quem enviou; para responder ao grupo use phone
+            body.get("phone")
+            or body.get("participantPhone")
             or body.get("senderPhone")
             or body.get("from")
             or (body.get("data") or {}).get("phone")
             or (body.get("payload") or {}).get("phone")
         )
-        if not phone:
+        if phone is None:
             return None
         phone_str = str(phone).strip()
         if "@" in phone_str:
             phone_str = phone_str.split("@")[0]
-        # Grupo: doc envia "5544999999999-group"; send-text aceita group ID
         if "-group" in phone_str or body.get("isGroup"):
             return phone_str if len(phone_str) >= 10 else None
-        # Direto: doc send-text = "only send numbers without formatting or a mask"
         digits = re.sub(r"\D", "", phone_str)
         return digits if len(digits) >= 10 else None
     except Exception:
@@ -351,9 +362,9 @@ async def webhook_whatsapp(request: Request):
             resposta = f"Erro ao dar baixa: {msg}"
 
     # Envio da resposta de volta ao WhatsApp via Z-API send-text
-    phone = _extrair_phone_resposta(body)
+    # Prioridade: phone na raiz (Z-API envia como int ou string), depois participantPhone, depois extração completa
+    phone = _normalizar_phone(body.get("phone")) or _normalizar_phone(body.get("participantPhone")) or _extrair_phone_resposta(body)
     if not phone and resposta:
-        # Log para debug: Z-API envia "phone" na raiz (ex.: "5544999999999"); em grupo pode vir "phone": "55...-group"
         logger.warning(
             "Webhook: número não encontrado no payload. Campos do body: phone=%s participantPhone=%s from=%s senderPhone=%s isGroup=%s type=%s keys=%s",
             body.get("phone"),
